@@ -1,0 +1,22 @@
+# Python virtual environment
+venv/
+backend/venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Generated files
+downloads/
+frames/
+clips/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
