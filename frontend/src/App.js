@@ -1,55 +1,73 @@
+// Import React state so we can store data like page, clips, errors, etc.
 import { useState } from "react";
 
 function App() {
+  // This stores what page the user is currently on
   const [page, setPage] = useState("home");
+
+  // This stores the YouTube link the user pastes
   const [youtubeUrl, setYoutubeUrl] = useState("");
+
+  // This stores the user's name
   const [username, setUsername] = useState("");
+
+  // This tells the app if the video is currently processing
   const [loading, setLoading] = useState(false);
+
+  // This stores the generated clips from the backend
   const [clips, setClips] = useState([]);
+
+  // This stores error messages shown to the user
   const [errorMessage, setErrorMessage] = useState("");
 
+  // This stores saved clips in the browser
   const [savedClips, setSavedClips] = useState(() => {
     const stored = localStorage.getItem("savedClips");
     return stored ? JSON.parse(stored) : [];
   });
 
+  // This stores which caption version is currently shown
   const [captionVersions, setCaptionVersions] = useState({});
+
+  // This stores how many times the user has clicked redo caption
   const [redoCounts, setRedoCounts] = useState({});
 
- const goToSignup = async () => {
-  setErrorMessage("");
+  // This checks the YouTube link before moving to the signup page
+  const goToSignup = async () => {
+    setErrorMessage("");
 
-  if (!youtubeUrl.trim()) {
-    setErrorMessage("Please paste a YouTube link first.");
-    return;
-  }
-
-  try {
-    const response = await fetch("http://127.0.0.1:8000/check-video", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        youtube_url: youtubeUrl
-      })
-    });
-
-    const data = await response.json();
-
-    if (data.error) {
-      setErrorMessage(data.error);
+    if (!youtubeUrl.trim()) {
+      setErrorMessage("Please paste a YouTube link first.");
       return;
     }
 
-    setPage("signup");
+    try {
+      const response = await fetch("http://127.0.0.1:8000/check-video", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          youtube_url: youtubeUrl
+        })
+      });
 
-  } catch (error) {
-    console.error(error);
-    setErrorMessage("Could not check the video. Make sure your backend is running.");
-  }
-};
+      const data = await response.json();
 
+      if (data.error) {
+        setErrorMessage(data.error);
+        return;
+      }
+
+      setPage("signup");
+
+    } catch (error) {
+      console.error(error);
+      setErrorMessage("Could not check the video. Make sure your backend is running.");
+    }
+  };
+
+  // This creates an account for now and moves user to confirmation page
   const createAccount = () => {
     if (!username.trim()) {
       setErrorMessage("Please enter your name.");
@@ -60,6 +78,7 @@ function App() {
     setPage("confirm");
   };
 
+  // This sends the YouTube link to the backend for processing
   const processVideo = async () => {
     setLoading(true);
     setErrorMessage("");
@@ -104,6 +123,7 @@ function App() {
     setLoading(false);
   };
 
+  // This changes the caption text when user clicks redo caption
   const getCaptionText = (clip, index) => {
     const version = captionVersions[index] || 0;
     const original = clip.caption_text || "No speech detected in this clip.";
@@ -116,6 +136,7 @@ function App() {
     return original;
   };
 
+  // This lets the user redo the caption 3 times only
   const redoCaption = (index) => {
     const currentCount = redoCounts[index] || 0;
 
@@ -135,6 +156,7 @@ function App() {
     });
   };
 
+  // This saves generated clips to My Clips
   const saveClips = () => {
     const clipsToSave = clips.map((clip, index) => ({
       ...clip,
@@ -142,6 +164,7 @@ function App() {
       saved_at: new Date().toLocaleString()
     }));
 
+    // Save only 10 clips max because of storage limits
     const updatedSavedClips = [...clipsToSave, ...savedClips].slice(0, 10);
 
     setSavedClips(updatedSavedClips);
@@ -151,11 +174,39 @@ function App() {
     setPage("myclips");
   };
 
+  // This clears all saved clips
   const clearSavedClips = () => {
     setSavedClips([]);
     localStorage.removeItem("savedClips");
   };
 
+  // This downloads the clip to the user's laptop
+  const downloadClip = (clip) => {
+    const link = document.createElement("a");
+    link.href = clip.clip_url;
+    link.download = "emotion_clip.mp4";
+    link.click();
+  };
+
+  // This downloads the clip and opens YouTube Studio
+  const openYouTubeUpload = (clip) => {
+    downloadClip(clip);
+    window.open("https://studio.youtube.com", "_blank");
+  };
+
+  // This downloads the clip and opens TikTok upload page
+  const openTikTokUpload = (clip) => {
+    downloadClip(clip);
+    window.open("https://www.tiktok.com/upload", "_blank");
+  };
+
+  // This downloads the clip and opens Instagram
+  const openInstagramUpload = (clip) => {
+    downloadClip(clip);
+    window.open("https://www.instagram.com", "_blank");
+  };
+
+  // These are the navigation buttons at the top right
   const NavButtons = () => (
     <div style={styles.nav}>
       <button onClick={() => setPage("home")} style={styles.navButton}>Home</button>
@@ -196,16 +247,12 @@ function App() {
           .neon-input:focus {
             box-shadow: 0 0 35px #00e5ff;
           }
-
-          .social-upload:hover {
-            transform: scale(1.05);
-            filter: brightness(1.2);
-          }
         `}
       </style>
 
       <NavButtons />
 
+      {/* Home page */}
       {page === "home" && (
         <div style={styles.card} className="animated-card">
           <h1 style={styles.title}>🎬 Emotion Clips Generator</h1>
@@ -230,6 +277,7 @@ function App() {
         </div>
       )}
 
+      {/* Signup page */}
       {page === "signup" && (
         <div style={styles.card} className="animated-card">
           <h1 style={styles.title}>Create Account</h1>
@@ -266,6 +314,7 @@ function App() {
         </div>
       )}
 
+      {/* Confirm page */}
       {page === "confirm" && (
         <div style={styles.card} className="animated-card">
           <h1 style={styles.title}>Continue?</h1>
@@ -286,6 +335,7 @@ function App() {
         </div>
       )}
 
+      {/* Processing page */}
       {page === "processing" && (
         <div style={styles.card} className="animated-card">
           <h1 style={styles.title}>Processing Video</h1>
@@ -300,6 +350,7 @@ function App() {
         </div>
       )}
 
+      {/* Results page */}
       {page === "results" && (
         <div style={styles.resultsPage}>
           <h1 style={styles.title}>Your Generated Clips</h1>
@@ -323,15 +374,15 @@ function App() {
                 </div>
 
                 <div>
-                  <button onClick={() => alert("YouTube Shorts upload coming soon.")} style={styles.youtubeButton}>
+                  <button onClick={() => openYouTubeUpload(clip)} style={styles.youtubeButton}>
                     YouTube Shorts
                   </button>
 
-                  <button onClick={() => alert("TikTok upload coming soon.")} style={styles.tiktokButton}>
+                  <button onClick={() => openTikTokUpload(clip)} style={styles.tiktokButton}>
                     TikTok
                   </button>
 
-                  <button onClick={() => alert("Instagram Reels upload coming soon.")} style={styles.instagramButton}>
+                  <button onClick={() => openInstagramUpload(clip)} style={styles.instagramButton}>
                     Instagram Reels
                   </button>
                 </div>
@@ -347,6 +398,7 @@ function App() {
         </div>
       )}
 
+      {/* My Clips page */}
       {page === "myclips" && (
         <div style={styles.resultsPage}>
           <h1 style={styles.title}>My Clips</h1>
@@ -379,6 +431,20 @@ function App() {
                       <p style={styles.captionText}>{clip.saved_caption}</p>
                       <p style={styles.smallText}>Saved: {clip.saved_at}</p>
                     </div>
+
+                    <div>
+                      <button onClick={() => openYouTubeUpload(clip)} style={styles.youtubeButton}>
+                        YouTube Shorts
+                      </button>
+
+                      <button onClick={() => openTikTokUpload(clip)} style={styles.tiktokButton}>
+                        TikTok
+                      </button>
+
+                      <button onClick={() => openInstagramUpload(clip)} style={styles.instagramButton}>
+                        Instagram Reels
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -387,22 +453,23 @@ function App() {
         </div>
       )}
 
+      {/* Uploads page */}
       {page === "uploads" && (
         <div style={styles.card} className="animated-card">
           <h1 style={styles.title}>Uploads</h1>
           <p style={styles.subtitle}>
-            These buttons will connect to real upload APIs later.
+            These buttons download your clip and open the upload page.
           </p>
 
-          <button onClick={() => alert("YouTube Shorts upload will need Google OAuth and YouTube Data API.")} style={styles.bigYoutubeButton}>
+          <button onClick={() => window.open("https://studio.youtube.com", "_blank")} style={styles.bigYoutubeButton}>
             ▶ YouTube Shorts
           </button>
 
-          <button onClick={() => alert("TikTok upload will need TikTok Login Kit and Content Posting API.")} style={styles.bigTiktokButton}>
+          <button onClick={() => window.open("https://www.tiktok.com/upload", "_blank")} style={styles.bigTiktokButton}>
             ♪ TikTok
           </button>
 
-          <button onClick={() => alert("Instagram Reels upload will need Meta OAuth and Instagram Graph API.")} style={styles.bigInstagramButton}>
+          <button onClick={() => window.open("https://www.instagram.com", "_blank")} style={styles.bigInstagramButton}>
             ◎ Instagram Reels
           </button>
         </div>

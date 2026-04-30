@@ -22,6 +22,12 @@ import whisper
 # Import re so we can check if the link looks like a YouTube link
 import re
 
+# Used to create a small local database
+import sqlite3
+
+# Used to safely hash passwords
+import hashlib
+
 # Import os so we can create folders and file paths
 import os
 
@@ -76,6 +82,98 @@ whisper_model = whisper.load_model("base")
 # The user must send a YouTube URL
 class YouTubeRequest(BaseModel):
     youtube_url: str
+
+# This class defines register/login data
+class UserRequest(BaseModel):
+    name: str | None = None
+    email: str
+    password: str
+
+
+# This creates the users database table
+def create_users_table():
+    connection = sqlite3.connect("users.db")
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            email TEXT UNIQUE,
+            password TEXT
+        )
+    """)
+
+    connection.commit()
+    connection.close()
+
+
+# This turns a password into a safer hashed version
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+# Create users table when backend starts
+create_users_table()
+
+
+# Register a new user
+@app.post("/register")
+def register_user(request: UserRequest):
+    try:
+        connection = sqlite3.connect("users.db")
+        cursor = connection.cursor()
+
+        hashed_password = hash_password(request.password)
+
+        cursor.execute(
+            "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
+            (request.name, request.email, hashed_password)
+        )
+
+        connection.commit()
+        connection.close()
+
+        return {
+            "message": "Account created successfully",
+            "email": request.email
+        }
+
+    except sqlite3.IntegrityError:
+        return {
+            "error": "An account with this email already exists."
+        }
+
+
+# Login existing user
+@app.post("/login")
+def login_user(request: UserRequest):
+    connection = sqlite3.connect("users.db")
+    cursor = connection.cursor()
+
+    hashed_password = hash_password(request.password)
+
+    cursor.execute(
+        "SELECT id, name, email FROM users WHERE email = ? AND password = ?",
+        (request.email, hashed_password)
+    )
+
+    user = cursor.fetchone()
+    connection.close()
+
+    if user is None:
+        return {
+            "error": "Invalid email or password."
+        }
+
+    return {
+        "message": "Login successful",
+        "user": {
+            "id": user[0],
+            "name": user[1],
+            "email": user[2]
+        }
+    }
 
 
 # This function extracts image frames from the downloaded video
@@ -307,30 +405,39 @@ def make_clip_vertical(clip):
 
 # This function creates captions using Whisper
 def create_captions(clip_path):
-    # Whisper listens to the clip and turns speech into text
-    result = whisper_model.transcribe(clip_path)
+    try:
+        # Whisper listens to the clip and turns speech into text
+        result = whisper_model.transcribe(clip_path)
 
-    captions = []
+        captions = []
 
-    # Save captions with start and end times
-    for segment in result["segments"]:
-        captions.append({
-            "start": round(segment["start"], 2),
-            "end": round(segment["end"], 2),
-            "text": segment["text"].strip()
-        })
+        # Save captions with start and end times
+        for segment in result["segments"]:
+            captions.append({
+                "start": round(segment["start"], 2),
+                "end": round(segment["end"], 2),
+                "text": segment["text"].strip()
+            })
 
-    return {
-        "full_text": result["text"].strip(),
-        "captions": captions
-    }
+        return {
+            "full_text": result["text"].strip(),
+            "captions": captions
+        }
 
+    except Exception as e:
+        # If captions fail, return a backup message instead of crashing
+        return {
+            "full_text": "Caption could not be generated for this clip.",
+            "captions": [],
+            "caption_error": str(e)
+        }
 
-# This function creates vertical clips and captions
+# This function creates vertical clips
+# It is safer because if one clip fails, the whole app will not crash
 def create_video_clips(video_path, video_id, clip_moments, video_duration):
     created_clips = []
 
-    # Create a clips folder for this video
+    # Create folder for this video's clips
     video_clips_folder = os.path.join(CLIPS_FOLDER, video_id)
     os.makedirs(video_clips_folder, exist_ok=True)
 
@@ -338,52 +445,64 @@ def create_video_clips(video_path, video_id, clip_moments, video_duration):
     video = VideoFileClip(video_path)
 
     for index, moment in enumerate(clip_moments):
-        emotion = moment["emotion"]
-        start_time = moment["start_time"]
-        end_time = moment["end_time"]
+        try:
+            emotion = moment["emotion"]
+            start_time = moment["start_time"]
+            end_time = moment["end_time"]
 
-        # Make sure clip does not go past the video duration
-        if end_time > video_duration:
-            end_time = video_duration
+            # Make sure the clip does not go past the video length
+            if end_time > video_duration:
+                end_time = video_duration
 
-        # Create clip filename
-        clip_filename = f"{emotion}_vertical_clip_{index + 1}.mp4"
-        clip_path = os.path.join(video_clips_folder, clip_filename)
+            # Create clip file name
+            clip_filename = f"{emotion}_vertical_clip_{index + 1}.mp4"
+            clip_path = os.path.join(video_clips_folder, clip_filename)
 
-        # Cut the clip from the full video
-        clip = video.subclipped(start_time, end_time)
+            # Cut clip from full video
+            clip = video.subclipped(start_time, end_time)
 
-        # Make the clip vertical
-        vertical_clip = make_clip_vertical(clip)
+            # Make clip vertical
+            vertical_clip = make_clip_vertical(clip)
 
-        # Save the vertical clip
-        vertical_clip.write_videofile(
-            clip_path,
-            codec="libx264",
-            audio_codec="aac"
-        )
+            # Save the clip
+            # logger=None stops MoviePy terminal logger problems
+            vertical_clip.write_videofile(
+                clip_path,
+                codec="libx264",
+                audio_codec="aac",
+                logger=None
+            )
 
-        # Close clips to free memory
-        vertical_clip.close()
-        clip.close()
+            # Close clips
+            vertical_clip.close()
+            clip.close()
 
-        # Create captions for this clip
-        caption_result = create_captions(clip_path)
+            # TEMPORARY safe caption
+            # We will fix Whisper after clips work again
+            caption_result = {
+                "full_text": "Caption will be generated here.",
+                "captions": []
+            }
 
-        # Create browser URL for frontend
-        clip_url = f"http://127.0.0.1:8000/clips/{video_id}/{clip_filename}"
+            # URL frontend can use
+            clip_url = f"http://127.0.0.1:8000/clips/{video_id}/{clip_filename}"
 
-        created_clips.append({
-            "emotion": emotion,
-            "start_time": start_time,
-            "end_time": end_time,
-            "clip_path": clip_path,
-            "clip_url": clip_url,
-            "caption_text": caption_result["full_text"],
-            "captions": caption_result["captions"]
-        })
+            created_clips.append({
+                "emotion": emotion,
+                "start_time": start_time,
+                "end_time": end_time,
+                "clip_path": clip_path,
+                "clip_url": clip_url,
+                "caption_text": caption_result["full_text"],
+                "captions": caption_result["captions"]
+            })
 
-    # Close the full video
+        except Exception as e:
+            # If one clip fails, skip it and continue
+            print("Clip failed:", str(e))
+            continue
+
+    # Close full video
     video.close()
 
     return created_clips
